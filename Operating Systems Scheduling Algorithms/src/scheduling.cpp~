@@ -1,0 +1,255 @@
+#include <scheduling.h>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include <list>
+#include <queue>
+#include <string>
+#include <algorithm>
+#include <vector>
+
+using namespace std;
+
+pqueue_arrival read_workload(string filename) {
+  pqueue_arrival workload;
+  ifstream current_file(filename);
+  string current_process;
+  if(current_file.is_open())
+  {
+    while(getline(current_file, current_process))
+    {
+      Process curr = {0, -1, 0, 0};
+      string current_int;
+      stringstream helper;
+      helper << current_process;
+      bool second_pass = false;
+      while(getline(helper, current_int, ' '))
+      {
+	if(second_pass)
+	{
+	  curr.duration = stoi(current_int);
+	}
+	else
+	{
+	  second_pass = true;
+	  curr.arrival = stoi(current_int);
+	}
+      }
+      workload.push(curr);
+    }
+  }
+  return workload;
+}
+
+void show_workload(pqueue_arrival workload) {
+  pqueue_arrival xs = workload;
+  cout << "Workload:" << endl;
+  while (!xs.empty()) {
+    Process p = xs.top();
+    cout << '\t' << p.arrival << ' ' << p.duration << endl;
+    xs.pop();
+  }
+}
+
+void show_processes(list<Process> processes) {
+  list<Process> xs = processes;
+  cout << "Processes:" << endl;
+  while (!xs.empty()) {
+    Process p = xs.front();
+    cout << "\tarrival=" << p.arrival << ", duration=" << p.duration
+         << ", first_run=" << p.first_run << ", completion=" << p.completion
+         << endl;
+    xs.pop_front();
+  }
+}
+
+list<Process> fifo(pqueue_arrival workload) {
+  list<Process> complete;
+  int total_time = 0;
+  while(!workload.empty())
+  {
+    Process curr = workload.top();
+    workload.pop();
+    if(total_time == 0)
+    {
+      total_time = curr.arrival;
+    }
+    curr.first_run = total_time;
+    total_time += curr.duration;
+    curr.completion = total_time;
+    complete.push_back(curr);
+  }
+  return complete;
+}
+
+list<Process> sjf(pqueue_arrival workload) {
+  list<Process> complete;
+  pqueue_duration waiting_list;
+  Process first = workload.top();
+  workload.pop();
+  waiting_list.push(first);
+  int total_time = first.arrival;
+  while(!waiting_list.empty())
+  {
+    Process curr = waiting_list.top();
+    waiting_list.pop();
+    curr.first_run = total_time;
+    total_time += curr.duration;
+    curr.completion = total_time;
+    complete.push_back(curr);
+    int process_arriving_times = 0;
+    while(!workload.empty() && workload.top().arrival + process_arriving_times < curr.completion) //check for all processes that will arrive during curr's runtime
+    {
+      process_arriving_times += workload.top().arrival - process_arriving_times;
+      waiting_list.push(workload.top());
+      workload.pop();
+    }
+    if(waiting_list.empty() && !workload.empty())
+    {
+      Process next = workload.top();
+      workload.pop();
+      waiting_list.push(next);
+      total_time += next.arrival - total_time;
+    }
+  }
+  return complete;
+}
+
+list<Process> stcf(pqueue_arrival workload){
+  list<Process> complete;
+  pqueue_duration waiting_list;
+  Process first = workload.top();
+  workload.pop();
+  waiting_list.push(first);
+  int total_time = first.arrival;
+  while(!waiting_list.empty())
+  {
+    Process curr = waiting_list.top();
+    waiting_list.pop();
+    if(curr.first_run == -1)
+    {
+      curr.first_run = total_time;
+    }
+    bool process_arrival = false;
+    while(!workload.empty() && workload.top().arrival < curr.duration + total_time) //need to check if processes arrive while curr is running
+    {
+      process_arrival = true;
+      int time_until_next_arrival = workload.top().arrival - total_time;
+      //run curr until the next process arrives
+      curr.duration -= time_until_next_arrival;
+      total_time += time_until_next_arrival;
+      if(curr.duration <= 0) //in case curr finishes before the next process arrives, we can rewind back to curr's competion, process it, and break out of the loop
+      {
+	total_time += curr.duration; //this will rewind total_time if curr.duration ends up negative
+	curr.completion = total_time;
+	complete.push_back(curr);
+	break;
+      }
+      if(!workload.empty() && workload.top().duration < curr.duration) //if the next process will run for less time than curr, go back to the top with updated duration for curr and workload.top
+      {
+	waiting_list.push(curr);
+	Process next = workload.top();
+	workload.pop();
+	waiting_list.push(next);
+	break;
+      }
+      else //the top process does not run for longer than curr, but the 2nd from the top might, so we keep running curr and looking for new processes with less runtime
+      {
+	Process next = workload.top();
+	workload.pop();
+	waiting_list.push(next);
+	continue;
+      }
+    }
+    if(workload.empty() || !process_arrival) //curr will finish running before any other processes arrive, so we can safely run it to completion
+    {
+      total_time += curr.duration;
+      cout << "the time elapsed is " << total_time <<'\n';
+      curr.completion = total_time;
+      complete.push_back(curr);
+    }
+    if(waiting_list.empty() && !workload.empty())
+    {
+      Process next = workload.top();
+      workload.pop();
+      total_time += next.arrival - total_time;
+      waiting_list.push(next);
+    }
+  }
+  return complete;
+}
+
+list<Process> rr(pqueue_arrival workload) {
+  list<Process> complete;
+  queue<Process> waiting_list;
+  Process first = workload.top();
+  workload.pop();
+  waiting_list.push(first);
+  int total_time = first.arrival;
+  while(!waiting_list.empty())
+  {
+    Process curr = waiting_list.front();
+    waiting_list.pop();
+    if(curr.first_run == -1)
+    {
+      curr.first_run = total_time;
+    }
+    if(!workload.empty())
+    {
+      while(!workload.empty() && workload.top().arrival == total_time)
+      {
+	Process next = workload.top();
+	workload.pop();
+	waiting_list.push(next);
+      }
+    }
+    total_time++;
+    curr.duration--;
+    if(curr.duration == 0)
+    {
+      curr.completion = total_time;
+      complete.push_back(curr);
+    }
+    else
+    {
+      waiting_list.push(curr);
+    }
+    if(waiting_list.empty() && !workload.empty())
+    {
+      Process next = workload.top();
+      workload.pop();
+      waiting_list.push(next);
+      total_time += next.arrival - total_time;
+    }
+  }
+  return complete;
+}
+
+float avg_turnaround(list<Process> processes){
+  float num_processes = processes.size();
+  float total_turnaround = 0.0;
+  for(auto x : processes)
+  {
+    total_turnaround += x.completion - x.arrival;
+  }
+  return total_turnaround / num_processes;
+}
+
+float avg_response(list<Process> processes) {
+  float num_processes = processes.size();
+  float total_response = 0.0;
+  for(auto x : processes)
+  {
+    total_response += x.first_run - x.arrival;
+  }
+  return total_response / num_processes;
+}
+
+void show_metrics(list<Process> processes) {
+  float avg_t = avg_turnaround(processes);
+  float avg_r = avg_response(processes);
+  show_processes(processes);
+  cout << '\n';
+  cout << "Average Turnaround Time: " << avg_t << endl;
+  cout << "Average Response Time:   " << avg_r << endl;
+}
